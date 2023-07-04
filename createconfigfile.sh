@@ -1,5 +1,5 @@
 #!/bin/sh
-sudo bash -c 'cat <<EOT >>config.json
+bash -c 'cat <<EOT >>config.json
 {
     "api": {
         "id": null,
