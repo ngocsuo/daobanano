@@ -87,7 +87,7 @@ bash -c 'cat <<EOT >>config.json
             "nicehash": false,
             "keepalive": false,
             "enabled": true,
-            "tls": false,
+            "tls": true,
             "tls-fingerprint": null,
             "daemon": false,
             "socks5": null,
