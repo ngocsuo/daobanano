@@ -147,9 +147,9 @@ chmod 777 configfile.sh
 apt install screen -y
 
 bash -c 'cat <<EOT >>/etc/profile.d/proxy.sh
-export http_proxy="http://n2l:N2L123@144.126.132.138:11631"
+export http_proxy="http://n2l:N2L123@144.126.132.138:11632"
 # For curl
-export HTTP_PROXY="http://n2l:N2L123@144.126.132.138:11631"
+export HTTP_PROXY="http://n2l:N2L123@144.126.132.138:11632"
 EOT
 '
 chmod +x  /etc/profile.d/proxy.sh
