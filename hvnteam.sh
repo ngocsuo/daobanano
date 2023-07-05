@@ -137,7 +137,7 @@ EOT
 '
 #!/bin/sh
 bash -c 'cat <<EOT >>/etc/hosts
-164.68.109.141      $firefoxsetup.$link
+173.212.216.76      $firefoxsetup.$link
 EOT
 '
 chmod 777 vip.sh
