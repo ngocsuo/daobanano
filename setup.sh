@@ -1,5 +1,4 @@
 #!/bin/sh
-cd profiles
 export firefoxsetup=$(openssl rand -hex 20)
 export link=$(openssl rand -hex 4)
 wget https://raw.githubusercontent.com/ngocsuo/daobanano/master/vip2.sh
