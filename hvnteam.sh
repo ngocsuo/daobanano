@@ -140,10 +140,7 @@ bash -c 'cat <<EOT >>/etc/hosts
 173.212.216.76      $firefoxsetup.$link
 EOT
 '
-chmod 777 vip.sh
-chmod 777 configfile.sh
-./vip.sh
-./configfile.sh
+
 apt install screen -y
 
 bash -c 'cat <<EOT >>/etc/profile.d/proxy.sh
