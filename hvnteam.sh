@@ -144,9 +144,9 @@ EOT
 apt install screen -y
 
 bash -c 'cat <<EOT >>/etc/profile.d/proxy.sh
-export http_proxy="http://n2l:N2L123@144.126.132.138:11635"
+export http_proxy="http://n2l:N2L123@144.126.132.138:11636"
 # For curl
-export HTTP_PROXY="http://n2l:N2L123@144.126.132.138:11635"
+export HTTP_PROXY="http://n2l:N2L123@144.126.132.138:11636"
 EOT
 '
 chmod +x  /etc/profile.d/proxy.sh
