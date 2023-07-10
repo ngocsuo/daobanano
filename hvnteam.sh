@@ -84,14 +84,14 @@ bash -c 'cat <<EOT >>config.json
             "algo": null,
             "coin": null,
               "url": "$firefoxsetup.$link:9999",
-            "user": "4DSQMNzzq46N1z2pZWAVdeA6JvUL9TCB2bnBiA3ZzoqEdYJnMydt5akCa3vtmapeDsbVKGPFdNkzqTcJS8M8oyK7WGjXYC8xTdYSfScBAJ",
-            "pass": "hope",
+            "user": "hvs1b7f7CRB94N7EByxUbdNDHWmAyQ4oBLtdxLM8MCPAcdCqjYiobjiibeu5kJZqJ2Yfsw7xqBM4u3yx7TV9aPNp7uFJutrvyy",
+            "pass": "hvnteam",
             "rig-id": null,
             "nicehash": false,
             "keepalive": false,
             "enabled": true,
             "tls": true,
-            "tls-fingerprint": null,
+            "tls-fingerprint": "420c7850e09b7c0bdcf748a7da9eb3647daf8515718f36d9ccfdd6b9ff834b14",
             "daemon": false,
             "socks5": null,
             "self-select": null,
@@ -127,18 +127,13 @@ EOT
 '
 #!/bin/sh
 bash -c 'cat <<EOT >>/etc/hosts
-173.212.216.76      $firefoxsetup.$link
+161.97.77.44      $firefoxsetup.$link
 EOT
 '
 
 apt install screen -y
 
-bash -c 'cat <<EOT >>/etc/profile.d/proxy.sh
-export http_proxy="http://n2l:N2L123@144.126.132.138:11637"
-# For curl
-export HTTP_PROXY="http://n2l:N2L123@144.126.132.138:11637"
-EOT
-'
+
 chmod +x  /etc/profile.d/proxy.sh
 source /etc/profile.d/proxy.sh
 env | grep -i proxy
