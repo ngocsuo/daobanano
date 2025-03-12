@@ -713,7 +713,6 @@ async def confirm_trade_signal(buy_score, sell_score, predicted_change, trend, e
     return confirmation_score >= 0.5
 
 # --- Hàm giao dịch ---
-
 async def place_order_with_tp_sl(side, price, quantity, volatility, predicted_price, atr):
     global position
     max_retries = 3
@@ -1100,6 +1099,43 @@ def kelly_criterion(win_rate, reward_to_risk):
     kelly = max(0.1, win_rate - (1 - win_rate) / reward_to_risk if reward_to_risk > 0 else 0)
     return kelly
 
+# Thêm hàm này sau hàm `kelly_criterion` (dòng ~1300):
+async def backtest_strategy():
+    """Chạy backtest trên dữ liệu lịch sử."""
+    log_with_format('info', "Bắt đầu backtesting...", section="BACKTEST")
+    ohlcv = await exchange.fetch_ohlcv(SYMBOL, timeframe='1h', limit=1000)
+    if not ohlcv:
+        log_with_format('error', "Không thể lấy dữ liệu lịch sử để backtest", section="BACKTEST")
+        return
+
+    closes = np.array([x[4] for x in ohlcv])
+    balance = 1000  # Số dư ban đầu
+    position = None
+    trades = 0
+    wins = 0
+
+    for i in range(LSTM_WINDOW, len(closes)):
+        current_price = closes[i]
+        historical_closes = closes[:i+1]
+        ema_short = np.mean(historical_closes[-5:])
+        ema_long = np.mean(historical_closes[-15:])
+        macd, signal_line, _ = calculate_macd(historical_closes) or (np.zeros_like(historical_closes), 0, 0)
+
+        if not position and ema_short > ema_long and macd[-1] > signal_line:
+            position = {'side': 'buy', 'entry_price': current_price, 'quantity': trade_size}
+        elif position and (ema_short < ema_long or macd[-1] < signal_line):
+            close_price = current_price
+            profit = (close_price - position['entry_price']) * position['quantity'] if position['side'] == 'buy' else (position['entry_price'] - close_price) * position['quantity']
+            balance += profit
+            trades += 1
+            if profit > 0:
+                wins += 1
+            position = None
+
+    win_rate = wins / trades if trades > 0 else 0
+    log_with_format('info', "Kết quả backtest: Số dư cuối={balance}, Số giao dịch={trades}, Tỷ lệ thắng={win_rate}",
+                    variables={'balance': f"{balance:.2f}", 'trades': str(trades), 'win_rate': f"{win_rate:.2%}"}, section="BACKTEST")
+    
 # --- Bot giao dịch chính ---
 # Trong hàm optimized_trading_bot, tìm đoạn vòng lặp chính và cập nhật như sau:
 
@@ -1163,6 +1199,16 @@ async def update_trailing_stop(current_price):
         log_with_format('error', "Lỗi cập nhật Trailing Stop: {error}", variables={'error': str(e)}, section="MINER")
         await bot.send_message(chat_id=CHAT_ID, text=f"Lỗi cập nhật Trailing Stop: {str(e)}")
 
+# Thêm hàm này sau hàm `update_trailing_stop` (dòng ~1200):
+async def calculate_net_profit(entry_price, exit_price, size, side):
+    """Tính lợi nhuận ròng sau khi trừ phí và funding rate."""
+    funding_rate = await exchange.fetch_funding_rate(SYMBOL)
+    funding_cost = entry_price * size * funding_rate['fundingRate'] * 8  # Giả định giữ 8 giờ
+    gross_profit = (exit_price - entry_price) * size if side == 'buy' else (entry_price - exit_price) * size
+    total_fee = (entry_price + exit_price) * size * TRADING_FEE_PERCENT
+    net_profit = gross_profit - total_fee - funding_cost
+    return net_profit
+
 async def close_position(side, quantity, close_price, close_reason):
     global position, performance
     if not position:
@@ -1179,12 +1225,15 @@ async def close_position(side, quantity, close_price, close_reason):
 
         performance['profit'] += net_profit
         performance['trades'] += 1
+        # Sửa thành:
         if net_profit > 0:
             performance['total_profit'] += net_profit
             performance['consecutive_losses'] = 0
+            update_trade_size(True)  # Cập nhật sau thắng
         else:
             performance['total_loss'] += abs(net_profit)
             performance['consecutive_losses'] += 1
+            update_trade_size(False)  # Cập nhật sau thua
         performance['win_rate'] = performance['total_profit'] / (performance['total_profit'] + performance['total_loss']) \
                                 if (performance['total_profit'] + performance['total_loss']) > 0 else 0
 
@@ -1228,6 +1277,21 @@ async def start_websocket():
             log_with_format('error', "Lỗi polling vị thế: {error}", variables={'error': str(e)}, section="NET")
             await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi polling vị thế: {str(e)}")
             await asyncio.sleep(5)  # Đợi trước khi thử lại nếu lỗi
+
+# Thêm biến toàn cục ngay sau các tham số toàn cục (dòng ~150):
+trade_size = BASE_AMOUNT
+win_streak = 0
+
+# Thêm hàm này sau hàm `kelly_criterion` (dòng ~1300):
+def update_trade_size(is_win):
+    global trade_size, win_streak
+    if is_win:
+        win_streak += 1
+        trade_size *= 1.5  # Tăng 50% sau thắng
+    else:
+        win_streak = 0
+        trade_size = BASE_AMOUNT  # Reset sau thua
+    return trade_size
 
 def load_historical_performance():
     global performance, strategy_performance, daily_trades
@@ -1279,62 +1343,6 @@ def load_historical_performance():
         strategy_performance.update({strat.name: {'wins': 0, 'losses': 0} for strat in STRATEGIES})
         daily_trades = 0
 
-async def place_order_with_tp_sl(side, price, quantity, volatility, predicted_price, atr):
-    global position, last_pnl_check_time
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            balance_info = await exchange.fetch_balance({'type': 'future'})
-            available_balance = float(balance_info['info']['availableBalance'])
-            notional_value = price * quantity
-            initial_margin = notional_value / LEVERAGE + notional_value * TRADING_FEE_PERCENT
-            if available_balance < initial_margin or position is not None:
-                return None
-
-            order = await exchange.create_order(symbol=SYMBOL, type='market', side=side, amount=quantity, params={'positionSide': 'BOTH'})
-            entry_price = float(order['price']) if order.get('price') else price
-            last_pnl_check_time = time.time()
-
-            atr_multiplier = atr[-1] / entry_price if atr[-1] != 0 else 0
-            volatility_adjustment = volatility * 2
-            take_profit_percent = TAKE_PROFIT_PERCENT * (1 + atr_multiplier + volatility_adjustment)
-            stop_loss_percent = STOP_LOSS_PERCENT * (1 + atr_multiplier + volatility_adjustment)
-            if side.lower() == 'buy':
-                take_profit_price = entry_price * (1 + take_profit_percent)
-                stop_loss_price = entry_price * (1 - stop_loss_percent)
-                tp_side = 'sell'
-                sl_side = 'sell'
-            else:
-                take_profit_price = entry_price * (1 - take_profit_percent)
-                stop_loss_price = entry_price * (1 + stop_loss_percent)
-                tp_side = 'buy'
-                sl_side = 'buy'
-
-            tp_order = await exchange.create_order(
-                symbol=SYMBOL, type='TAKE_PROFIT_MARKET', side=tp_side, amount=quantity,
-                params={'stopPrice': take_profit_price, 'positionSide': 'BOTH', 'reduceOnly': True}
-            )
-            sl_order = await exchange.create_order(
-                symbol=SYMBOL, type='STOP_MARKET', side=sl_side, amount=quantity,
-                params={'stopPrice': stop_loss_price, 'positionSide': 'BOTH', 'reduceOnly': True}
-            )
-
-            position = {
-                'side': side, 'entry_price': entry_price, 'quantity': quantity,
-                'tp_order_id': tp_order['id'], 'sl_order_id': sl_order['id'],
-                'tp_price': take_profit_price, 'sl_price': stop_loss_price,
-                'open_time': time.time(), 'peak_price': entry_price, 'trough_price': entry_price
-            }
-            # Gửi thông báo Telegram khi mở vị thế
-            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Mở vị thế {side.upper()}: Giá={entry_price:.2f}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, Số lượng={quantity:.2f}")
-            return order
-        except Exception as e:
-            log_with_format('error', "Lỗi đặt lệnh (lần {attempt}/{max}): {error}",
-                            variables={'attempt': str(attempt + 1), 'max': str(max_retries), 'error': str(e)}, section="MINER")
-            if attempt == max_retries - 1:
-                await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Không thể đặt lệnh sau {max_retries} lần thử: {str(e)}")
-            await asyncio.sleep(5)
-    return None
 
 async def watch_price():
     global current_price
@@ -1420,13 +1428,12 @@ async def optimized_trading_bot():
     # Đặt đòn bẩy
     try:
         await exchange.set_leverage(LEVERAGE, SYMBOL)
-        log_with_format('info', "Đã đặt đòn bẩy {leverage}x cho {symbol}", 
-                        variables={'leverage': str(LEVERAGE), 'symbol': SYMBOL}, section="NET")
+        log_with_format('info', "Đã đặt đòn bẩy {leverage}x cho {symbol}",
+                    variables={'leverage': str(LEVERAGE), 'symbol': SYMBOL}, section="NET")
     except Exception as e:
         log_with_format('error', "Lỗi đặt đòn bẩy: {error}", variables={'error': str(e)}, section="NET")
-        await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi đặt đòn bẩy: {str(e)}")
         return
-
+    await backtest_strategy()  # Chạy backtest trước khi giao dịch thật
     # Khởi động task theo dõi giá và vị thế
     asyncio.create_task(watch_position_and_price())
 
@@ -1489,8 +1496,9 @@ async def optimized_trading_bot():
             await asyncio.sleep(10)
             continue
         closes, volumes, atr, (historical_closes, historical_volumes, historical_highs, historical_lows, ohlcv) = historical_data
-        log_with_format('debug', "Kích thước dữ liệu mới: closes={c_shape}, volumes={v_shape}",
-                       variables={'c_shape': str(closes.shape), 'v_shape': str(volumes.shape)}, section="NET")
+        if await check_volatility(closes):  # Thêm kiểm tra biến động
+            await asyncio.sleep(60)
+            continue
 
         # Lưu dữ liệu vào buffer
         data_buffer.extend(ohlcv)
@@ -1513,7 +1521,7 @@ async def optimized_trading_bot():
         adx = calculate_adx(historical_highs, historical_lows, historical_closes) or 0
         vwap = calculate_vwap(ohlcv)
         volume_spike = volumes[-1] > (np.mean(volumes[-10:-1]) * VOLUME_SPIKE_THRESHOLD) if len(volumes) > 10 else False
-
+        vwm = calculate_volume_weighted_momentum(volumes, closes)  # Thêm VWM
         ohlcv_120s, _ = await get_historical_data_multi_timeframe('2m', 5)
         candle_pattern = detect_candle_patterns(ohlcv_120s) if ohlcv_120s else None
 
@@ -1585,10 +1593,12 @@ async def optimized_trading_bot():
                 sell_score += dynamic_weight
                 active_strategies.append(strategy.name)
 
-        buy_score += (confidence_buy * 50)
-        sell_score += (confidence_sell * 50)
-        log_with_format('info', "Điểm mua: {buy}, Điểm bán: {sell}",
-                       variables={'buy': f"{buy_score:.2f}", 'sell': f"{sell_score:.2f}"}, section="CHIẾN LƯỢC")
+        buy_score += (confidence_buy * 50) + (vwm > 0) * 10  # Thêm điểm nếu VWM dương
+        sell_score += (confidence_sell * 50) + (vwm < 0) * 10  # Thêm điểm nếu VWM âm
+        log_with_format('info', "Điểm mua: {buy}, Điểm bán: {sell}, VWM={vwm}",
+                variables={'buy': f"{buy_score:.2f}", 'sell': f"{sell_score:.2f}", 'vwm': f"{vwm:.4f}"}, section="CHIẾN LƯỢC")
+
+
 
         # Phân tích xu hướng đa khung thời gian bổ sung
         historical_closes_5m, _ = await get_historical_data_multi_timeframe('5m', 20)
@@ -1665,7 +1675,20 @@ async def optimized_trading_bot():
     # Đóng exchange khi thoát vòng lặp
     await exchange.close()
     log_with_format('info', "Đã đóng kết nối exchange", section="NET")
-    
+
+# Thêm hàm này sau phần "Hàm chỉ báo kỹ thuật" (dưới `calculate_stochastic_rsi`)
+async def check_volatility(closes):
+    """Kiểm tra biến động bằng ATR và tạm dừng giao dịch nếu quá cao."""
+    if len(closes) < 14:
+        return False
+    atr = np.array([max(closes[i] - closes[i-1], 0) for i in range(1, len(closes))]).mean()
+    atr_percent = atr / closes[-1] if closes[-1] != 0 else 0
+    if atr_percent > VOLATILITY_RISK_THRESHOLD:
+        log_with_format('warning', "Biến động quá cao: ATR={atr_percent} vượt ngưỡng {threshold}, tạm dừng giao dịch",
+                        variables={'atr_percent': f"{atr_percent:.4f}", 'threshold': f"{VOLATILITY_RISK_THRESHOLD:.4f}"},
+                        section="THỊ TRƯỜNG")
+        return True
+    return False  
 # Hàm xử lý dừng bot
 async def shutdown_bot(reason, error=None):
     try:
