@@ -239,7 +239,7 @@ async def test_order_placement():
     log_with_format('info', "=== BẮT ĐẦU KIỂM TRA ĐẶT VỊ THẾ VÀ TP/SL ===", section="MINER")
     log_with_format('info', "Phiên bản code: TEST_QUANTITY set cứng = 1", section="MINER")
     MIN_NOTIONAL_VALUE = 20.0
-    TEST_QUANTITY = 1  # Set cứng TEST_QUANTITY = 1
+    TEST_QUANTITY = 0.02  # Set cứng TEST_QUANTITY = 1
     wait_time = 5
     max_retries = 3
     monitoring_time = 120
