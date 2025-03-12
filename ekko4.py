@@ -932,7 +932,7 @@ async def watch_price():
                            variables={'error': str(e)}, section="NET")
             await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi polling giá: {str(e)}")
             await asyncio.sleep(10)  # Đợi lâu hơn nếu lỗi
-            
+
 async def close_position(side, quantity, close_price, close_reason):
     global position, performance
     try:
@@ -1360,7 +1360,8 @@ async def optimized_trading_bot():
     last_check_time = time.time()
     last_pnl_check_time = time.time()
     last_position_check = time.time()
-    current_price = None  # Giá sẽ được cập nhật qua WebSocket
+    current_price = None  # Giá sẽ được cập nhật qua polling/WebSocket
+    last_price = None  # Khởi tạo last_price
 
     # Tải lịch sử hiệu suất
     log_with_format('info', "Tải lịch sử hiệu suất từ cơ sở dữ liệu", section="CPU")
@@ -1426,16 +1427,26 @@ async def optimized_trading_bot():
         await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi đặt đòn bẩy: {str(e)}")
         return
 
-    # Khởi động WebSocket để theo dõi giá và vị thế
+    # Khởi động task theo dõi giá và vị thế
     asyncio.create_task(watch_position_and_price())
+
+    # Lấy giá ban đầu để khởi tạo last_price
+    try:
+        ticker = await exchange.fetch_ticker(SYMBOL)
+        last_price = float(ticker['last'])
+        current_price = last_price  # Khởi tạo current_price ban đầu
+        log_with_format('info', "Giá khởi tạo: {price}", variables={'price': f"{last_price:.2f}"}, section="NET")
+    except Exception as e:
+        log_with_format('error', "Lỗi lấy giá khởi tạo: {error}", variables={'error': str(e)}, section="NET")
+        return
 
     # Vòng lặp chính
     while True:
         current_time = time.time()
 
-        # Chờ giá từ WebSocket
+        # Chờ giá từ polling/WebSocket
         if not current_price:
-            log_with_format('warning', "Chưa có giá từ WebSocket, chờ 5s", section="NET")
+            log_with_format('warning', "Chưa có giá hiện tại, chờ 5s", section="NET")
             await asyncio.sleep(5)
             continue
 
@@ -1550,7 +1561,7 @@ async def optimized_trading_bot():
 
             kwargs = {
                 'current_price': current_price,
-                'last_price': last_price,
+                'last_price': last_price,  # Sử dụng last_price đã khởi tạo
                 'upper_band': upper_band,
                 'lower_band': lower_band,
                 'sma': sma,
@@ -1647,9 +1658,14 @@ async def optimized_trading_bot():
                     daily_trades += 1
                 is_trading = False
 
+        # Cập nhật last_price sau mỗi vòng lặp
         last_price = current_price
         await asyncio.sleep(0.5)
 
+    # Đóng exchange khi thoát vòng lặp
+    await exchange.close()
+    log_with_format('info', "Đã đóng kết nối exchange", section="NET")
+    
 # Hàm xử lý dừng bot
 async def shutdown_bot(reason, error=None):
     try:
