@@ -1340,7 +1340,6 @@ async def watch_price():
             log_with_format('error', "Lỗi WebSocket giá: {error}", variables={'error': str(e)}, section="NET")
             await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi WebSocket giá: {str(e)}")
             await asyncio.sleep(5)
-
 async def optimized_trading_bot():
     global lstm_model, lstm_classification_model, rf_classifier, is_trading, position, data_buffer, last_retrain_time, last_check_time, last_pnl_check_time, scaler
     global performance, daily_trades, strategy_performance, current_price, last_trade_time  # Khai báo global trước
@@ -1353,7 +1352,6 @@ async def optimized_trading_bot():
     last_pnl_check_time = time.time()
     current_price = None
     last_price = None
-    # Không gán giá trị cho last_trade_time ở đây, vì đã khai báo toàn cục ở trên
 
     # Tải lịch sử hiệu suất
     log_with_format('info', "Tải lịch sử hiệu suất từ cơ sở dữ liệu", section="CPU")
@@ -1600,7 +1598,10 @@ async def optimized_trading_bot():
 
         last_price = current_price
         await asyncio.sleep(CHECK_INTERVAL)
-        
+
+    # Đóng kết nối với Binance khi bot dừng
+    await exchange.close()
+    log_with_format('info', "Đã đóng kết nối với Binance", section="NET")       
 # Thêm hàm này sau phần "Hàm chỉ báo kỹ thuật" (dưới `calculate_stochastic_rsi`)
 async def check_volatility(closes):
     """Kiểm tra biến động bằng ATR và tạm dừng giao dịch nếu quá cao."""
