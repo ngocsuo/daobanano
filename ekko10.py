@@ -1343,7 +1343,7 @@ async def watch_price():
 
 async def optimized_trading_bot():
     global lstm_model, lstm_classification_model, rf_classifier, is_trading, position, data_buffer, last_retrain_time, last_check_time, last_pnl_check_time, scaler
-    global performance, daily_trades, strategy_performance, current_price, last_trade_time  # Thêm last_trade_time
+    global performance, daily_trades, strategy_performance, current_price, last_trade_time  # Khai báo global trước
 
     is_trading = False
     position = None
@@ -1353,7 +1353,7 @@ async def optimized_trading_bot():
     last_pnl_check_time = time.time()
     current_price = None
     last_price = None
-    last_trade_time = 0  # Biến để theo dõi thời gian mở vị thế cuối cùng
+    # Không gán giá trị cho last_trade_time ở đây, vì đã khai báo toàn cục ở trên
 
     # Tải lịch sử hiệu suất
     log_with_format('info', "Tải lịch sử hiệu suất từ cơ sở dữ liệu", section="CPU")
@@ -1578,7 +1578,6 @@ async def optimized_trading_bot():
                             variables={'side': position['side'].upper()}, section="MINER")
         elif not is_trading:
             # Kiểm tra thời gian kể từ vị thế cuối cùng
-            global last_trade_time
             if current_time - last_trade_time < 60:  # Chờ ít nhất 60 giây trước khi mở vị thế mới
                 log_with_format('info', "Bỏ qua tín hiệu giao dịch: Chưa đủ thời gian kể từ vị thế cuối cùng",
                                 section="MINER")
@@ -1601,6 +1600,7 @@ async def optimized_trading_bot():
 
         last_price = current_price
         await asyncio.sleep(CHECK_INTERVAL)
+        
 # Thêm hàm này sau phần "Hàm chỉ báo kỹ thuật" (dưới `calculate_stochastic_rsi`)
 async def check_volatility(closes):
     """Kiểm tra biến động bằng ATR và tạm dừng giao dịch nếu quá cao."""
