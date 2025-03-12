@@ -1340,6 +1340,7 @@ async def watch_price():
             log_with_format('error', "Lỗi WebSocket giá: {error}", variables={'error': str(e)}, section="NET")
             await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi WebSocket giá: {str(e)}")
             await asyncio.sleep(5)
+
 async def optimized_trading_bot():
     global lstm_model, lstm_classification_model, rf_classifier, is_trading, position, data_buffer, last_retrain_time, last_check_time, last_pnl_check_time, scaler
     global performance, daily_trades, strategy_performance, current_price, last_trade_time  # Khai báo global trước
@@ -1353,255 +1354,262 @@ async def optimized_trading_bot():
     current_price = None
     last_price = None
 
-    # Tải lịch sử hiệu suất
-    log_with_format('info', "Tải lịch sử hiệu suất từ cơ sở dữ liệu", section="CPU")
-    load_historical_performance()
-
-    # Khởi tạo mô hình
-    if os.path.exists('lstm_model.keras'):
-        lstm_model = load_model('lstm_model.keras')
-        log_with_format('info', "Đã tải mô hình LSTM Regression từ file", section="CPU")
-    else:
-        lstm_model = create_lstm_model()
-
-    if os.path.exists('lstm_classification_model.keras'):
-        lstm_classification_model = load_model('lstm_classification_model.keras')
-        log_with_format('info', "Đã tải mô hình LSTM Classification từ file", section="CPU")
-    else:
-        lstm_classification_model = create_lstm_classification_model()
-
-    if os.path.exists('scaler.pkl'):
-        with open('scaler.pkl', 'rb') as f:
-            scaler = pickle.load(f)
-        log_with_format('info', "Đã tải scaler từ file", section="CPU")
-    else:
-        scaler = MinMaxScaler()
-
-    if os.path.exists('rf_classifier.pkl'):
-        with open('rf_classifier.pkl', 'rb') as f:
-            rf_classifier = pickle.load(f)
-        log_with_format('info', "Đã tải RandomForest Classifier từ file", section="CPU")
-    else:
-        rf_classifier = create_rf_classifier()
-
-    # Lấy dữ liệu lịch sử ban đầu
-    historical_data = await get_historical_data()
-    if historical_data is None:
-        log_with_format('error', "Không thể lấy dữ liệu lịch sử, thoát", section="NET")
-        await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Không thể lấy dữ liệu lịch sử, bot thoát")
-        return
-    closes, volumes, atr, (historical_closes, historical_volumes, historical_highs, historical_lows, ohlcv) = historical_data
-
-    # Khởi tạo cơ sở dữ liệu
-    init_db()
-    if not os.path.exists('lstm_model.keras'):
-        await train_advanced_model(ohlcv, historical_closes, historical_highs, historical_lows, initial=True)
-    else:
-        await train_advanced_model(ohlcv, historical_closes, historical_highs, historical_lows, initial=False)
-
-    # Đặt đòn bẩy
     try:
-        await exchange.set_leverage(LEVERAGE, SYMBOL)
-        log_with_format('info', "Đã đặt đòn bẩy {leverage}x cho {symbol}",
-                        variables={'leverage': str(LEVERAGE), 'symbol': SYMBOL}, section="NET")
-    except Exception as e:
-        log_with_format('error', "Lỗi đặt đòn bẩy: {error}", variables={'error': str(e)}, section="NET")
-        await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi đặt đòn bẩy: {str(e)}")
-        return
+        # Tải lịch sử hiệu suất
+        log_with_format('info', "Tải lịch sử hiệu suất từ cơ sở dữ liệu", section="CPU")
+        load_historical_performance()
 
-    # Chạy backtest trước khi giao dịch thật
-    await backtest_strategy()
+        # Khởi tạo mô hình
+        if os.path.exists('lstm_model.keras'):
+            lstm_model = load_model('lstm_model.keras')
+            log_with_format('info', "Đã tải mô hình LSTM Regression từ file", section="CPU")
+        else:
+            lstm_model = create_lstm_model()
 
-    # Khởi động task theo dõi giá và vị thế
-    asyncio.create_task(watch_position_and_price())
+        if os.path.exists('lstm_classification_model.keras'):
+            lstm_classification_model = load_model('lstm_classification_model.keras')
+            log_with_format('info', "Đã tải mô hình LSTM Classification từ file", section="CPU")
+        else:
+            lstm_classification_model = create_lstm_classification_model()
 
-    ticker = await exchange.fetch_ticker(SYMBOL)
-    last_price = float(ticker['last'])
-    current_price = last_price
+        if os.path.exists('scaler.pkl'):
+            with open('scaler.pkl', 'rb') as f:
+                scaler = pickle.load(f)
+            log_with_format('info', "Đã tải scaler từ file", section="CPU")
+        else:
+            scaler = MinMaxScaler()
 
-    # Vòng lặp chính
-    while True:
-        current_time = time.time()
+        if os.path.exists('rf_classifier.pkl'):
+            with open('rf_classifier.pkl', 'rb') as f:
+                rf_classifier = pickle.load(f)
+            log_with_format('info', "Đã tải RandomForest Classifier từ file", section="CPU")
+        else:
+            rf_classifier = create_rf_classifier()
 
-        if not current_price:
-            log_with_format('warning', "Chưa có giá hiện tại, chờ 5s", section="NET")
-            await asyncio.sleep(5)
-            continue
-
-        try:
-            balance_info = await exchange.fetch_balance(params={'type': 'future'})
-            available_balance = float(balance_info['info']['availableBalance'])
-            log_with_format('debug', "Số dư khả dụng: {balance} USDT",
-                            variables={'balance': f"{available_balance:.2f}"}, section="CPU")
-        except Exception as e:
-            available_balance = 0
-
-        if ENABLE_PNL_CHECK and position and current_time - last_pnl_check_time >= PNL_CHECK_INTERVAL:
-            unrealized_pnl = (current_price - position['entry_price']) * position['quantity'] * LEVERAGE / position['entry_price'] \
-                            if position['side'].lower() == 'buy' else \
-                            (position['entry_price'] - current_price) * position['quantity'] * LEVERAGE / position['entry_price']
-            if unrealized_pnl < -PNL_THRESHOLD:
-                log_with_format('warning', "PNL vượt ngưỡng: {pnl}, đóng vị thế",
-                                variables={'pnl': f"{unrealized_pnl:.2f}"}, section="MINER")
-                await close_position('sell' if position['side'].lower() == 'buy' else 'buy',
-                                    position['quantity'], current_price, "PNL Threshold")
-            last_pnl_check_time = current_time
-
-        if performance['profit'] < -DAILY_LOSS_LIMIT or daily_trades >= MAX_DAILY_TRADES or performance['consecutive_losses'] >= 3:
-            log_with_format('warning', "DỪNG BOT: Profit={profit} | Trades={trades} | Losses liên tiếp={losses}",
-                            variables={'trades': str(daily_trades), 'losses': str(performance['consecutive_losses'])},
-                            profit=performance['profit'], section="CPU")
-            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Bot dừng: Profit={performance['profit']:.2f}, "
-                                                        f"Trades={daily_trades}, Losses liên tiếp={performance['consecutive_losses']}")
-            break
-
+        # Lấy dữ liệu lịch sử ban đầu
         historical_data = await get_historical_data()
         if historical_data is None:
-            log_with_format('warning', "Không lấy được dữ liệu, chờ 10s", section="NET")
-            await asyncio.sleep(10)
-            continue
+            log_with_format('error', "Không thể lấy dữ liệu lịch sử, thoát", section="NET")
+            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Không thể lấy dữ liệu lịch sử, bot thoát")
+            return
         closes, volumes, atr, (historical_closes, historical_volumes, historical_highs, historical_lows, ohlcv) = historical_data
 
-        if await check_volatility(closes):
-            await asyncio.sleep(60)
-            continue
-
-        data_buffer.extend(ohlcv)
-        if len(data_buffer) > BUFFER_SIZE:
-            data_buffer = data_buffer[-BUFFER_SIZE:]
-
-        if current_time - last_retrain_time >= RETRAIN_INTERVAL and len(data_buffer) >= LSTM_WINDOW + 10:
-            log_with_format('info', "--- HUẤN LUYỆN LẠI MÔ HÌNH ---", section="CPU")
-            await train_advanced_model(ohlcv, historical_closes, historical_highs, historical_lows, initial=False)
-            last_retrain_time = current_time
-
-        ema_short = np.mean(closes[-5:])
-        ema_long = np.mean(closes[-15:])
-        volatility = np.std(closes[-10:]) / np.mean(closes[-10:]) if np.mean(closes[-10:]) != 0 else 0
-        rsi = calculate_rsi(historical_closes) or 50
-        macd, signal_line, _ = calculate_macd(historical_closes) or (np.zeros_like(closes), 0, 0)
-        sma, upper_band, lower_band = calculate_bollinger_bands(historical_closes) or (0, 0, 0)
-        adx = calculate_adx(historical_highs, historical_lows, historical_closes) or 0
-        vwap = calculate_vwap(ohlcv)
-        volume_spike = volumes[-1] > (np.mean(volumes[-10:-1]) * VOLUME_SPIKE_THRESHOLD) if len(volumes) > 10 else False
-        vwm = calculate_volume_weighted_momentum(volumes, closes)
-
-        ohlcv_120s, _ = await get_historical_data_multi_timeframe('2m', 5)
-        candle_pattern = detect_candle_patterns(ohlcv_120s) if ohlcv_120s else None
-
-        stoch_k, stoch_d = calculate_stochastic_rsi(historical_closes) or (50, 50)
-
-        prediction_result = await predict_price_and_confidence(
-            closes, volumes, atr, historical_closes, historical_highs, historical_lows, historical_volumes, buy_score=0, sell_score=0
-        )
-        if prediction_result is None or prediction_result[0] is None:
-            predicted_price = current_price
-            confidence_buy = 0.5
-            confidence_sell = 0.5
-            predicted_change = 0
+        # Khởi tạo cơ sở dữ liệu
+        init_db()
+        if not os.path.exists('lstm_model.keras'):
+            await train_advanced_model(ohlcv, historical_closes, historical_highs, historical_lows, initial=True)
         else:
-            predicted_price, confidence_buy, confidence_sell = prediction_result
-            predicted_change = predicted_price - current_price if predicted_price else 0
+            await train_advanced_model(ohlcv, historical_closes, historical_highs, historical_lows, initial=False)
 
-        trend = await get_trend_confirmation()
-        market_state = 'trending' if adx > 25 else 'sideways' if adx < 20 else 'breakout' if volume_spike else 'normal'
+        # Đặt đòn bẩy
+        try:
+            await exchange.set_leverage(LEVERAGE, SYMBOL)
+            log_with_format('info', "Đã đặt đòn bẩy {leverage}x cho {symbol}",
+                            variables={'leverage': str(LEVERAGE), 'symbol': SYMBOL}, section="NET")
+        except Exception as e:
+            log_with_format('error', "Lỗi đặt đòn bẩy: {error}", variables={'error': str(e)}, section="NET")
+            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi đặt đòn bẩy: {str(e)}")
+            return
 
-        buy_score = 0
-        sell_score = 0
-        active_strategies = []
-        for strategy in STRATEGIES:
-            wins = strategy_performance[strategy.name]['wins']
-            losses = strategy_performance[strategy.name]['losses']
-            total = wins + losses
-            if total >= 50 and wins / total < 0.4:
-                log_with_format('warning', "Tạm dừng chiến lược {name}: Win Rate={win_rate}",
-                                variables={'name': strategy.name, 'win_rate': f"{wins/total:.2%}"}, section="CHIẾN LƯỢC")
+        # Chạy backtest trước khi giao dịch thật
+        await backtest_strategy()
+
+        # Khởi động task theo dõi giá và vị thế
+        asyncio.create_task(watch_position_and_price())
+
+        ticker = await exchange.fetch_ticker(SYMBOL)
+        last_price = float(ticker['last'])
+        current_price = last_price
+
+        # Vòng lặp chính
+        while True:
+            current_time = time.time()
+
+            if not current_price:
+                log_with_format('warning', "Chưa có giá hiện tại, chờ 5s", section="NET")
+                await asyncio.sleep(5)
                 continue
-            dynamic_weight = strategy.weight * (wins / total if total > 0 else 1.0)
 
-            kwargs = {
-                'current_price': current_price,
-                'last_price': last_price,
-                'upper_band': upper_band,
-                'lower_band': lower_band,
-                'sma': sma,
-                'rsi': rsi,
-                'ema_short': ema_short,
-                'ema_long': ema_long,
-                'adx': adx,
-                'predicted_change': predicted_change,
-                'atr': atr,
-                'volume_spike': volume_spike,
-                'macd': macd,
-                'signal_line': signal_line,
-                'volatility': volatility,
-                'vwap': vwap,
-                'candle_pattern': candle_pattern
-            }
-            if strategy.evaluate_buy(**kwargs):
-                buy_score += dynamic_weight
-                active_strategies.append(strategy.name)
-            if strategy.evaluate_sell(**kwargs):
-                sell_score += dynamic_weight
-                active_strategies.append(strategy.name)
+            try:
+                balance_info = await exchange.fetch_balance(params={'type': 'future'})
+                available_balance = float(balance_info['info']['availableBalance'])
+                log_with_format('debug', "Số dư khả dụng: {balance} USDT",
+                                variables={'balance': f"{available_balance:.2f}"}, section="CPU")
+            except Exception as e:
+                available_balance = 0
 
-        buy_score += (confidence_buy * 50) + (vwm > 0) * 10
-        sell_score += (confidence_sell * 50) + (vwm < 0) * 10
-        log_with_format('info', "Điểm mua: {buy}, Điểm bán: {sell}, VWM={vwm}",
-                        variables={'buy': f"{buy_score:.2f}", 'sell': f"{sell_score:.2f}", 'vwm': f"{vwm:.4f}"}, section="CHIẾN LƯỢC")
+            if ENABLE_PNL_CHECK and position and current_time - last_pnl_check_time >= PNL_CHECK_INTERVAL:
+                unrealized_pnl = (current_price - position['entry_price']) * position['quantity'] * LEVERAGE / position['entry_price'] \
+                                if position['side'].lower() == 'buy' else \
+                                (position['entry_price'] - current_price) * position['quantity'] * LEVERAGE / position['entry_price']
+                if unrealized_pnl < -PNL_THRESHOLD:
+                    log_with_format('warning', "PNL vượt ngưỡng: {pnl}, đóng vị thế",
+                                    variables={'pnl': f"{unrealized_pnl:.2f}"}, section="MINER")
+                    await close_position('sell' if position['side'].lower() == 'buy' else 'buy',
+                                        position['quantity'], current_price, "PNL Threshold")
+                last_pnl_check_time = current_time
 
-        historical_closes_5m, _ = await get_historical_data_multi_timeframe('5m', 20)
-        historical_closes_15m, _ = await get_historical_data_multi_timeframe('15m', 20)
-        if historical_closes_5m is not None and historical_closes_15m is not None:
-            ema_short_5m = np.mean(historical_closes_5m[-5:])
-            ema_long_5m = np.mean(historical_closes_5m[-15:])
-            ema_short_15m = np.mean(historical_closes_15m[-5:])
-            ema_long_15m = np.mean(historical_closes_15m[-15:])
-            if ema_short_5m > ema_long_5m and ema_short_15m > ema_long_15m:
-                buy_score += 20
-            elif ema_short_5m < ema_long_5m and ema_short_15m < ema_long_15m:
-                sell_score += 20
+            if performance['profit'] < -DAILY_LOSS_LIMIT or daily_trades >= MAX_DAILY_TRADES or performance['consecutive_losses'] >= 3:
+                log_with_format('warning', "DỪNG BOT: Profit={profit} | Trades={trades} | Losses liên tiếp={losses}",
+                                variables={'trades': str(daily_trades), 'losses': str(performance['consecutive_losses'])},
+                                profit=performance['profit'], section="CPU")
+                await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Bot dừng: Profit={performance['profit']:.2f}, "
+                                                            f"Trades={daily_trades}, Losses liên tiếp={performance['consecutive_losses']}")
+                break
 
-        usable_balance = available_balance * USE_PERCENTAGE
-        notional_value_max = usable_balance * LEVERAGE
-        max_quantity = notional_value_max / current_price if current_price != 0 else 0
-        reward_to_risk = TAKE_PROFIT_PERCENT / STOP_LOSS_PERCENT
-        kelly = kelly_criterion(performance['win_rate'], reward_to_risk)
-        kelly_adjusted = kelly * max(confidence_buy, confidence_sell)
-        base_quantity = trade_size * kelly_adjusted
-        quantity = min(base_quantity, max_quantity)
+            historical_data = await get_historical_data()
+            if historical_data is None:
+                log_with_format('warning', "Không lấy được dữ liệu, chờ 10s", section="NET")
+                await asyncio.sleep(10)
+                continue
+            closes, volumes, atr, (historical_closes, historical_volumes, historical_highs, historical_lows, ohlcv) = historical_data
 
-        if position is not None:
-            log_with_format('info', "Bỏ qua tín hiệu giao dịch: Đã có vị thế {side} đang mở",
-                            variables={'side': position['side'].upper()}, section="MINER")
-        elif not is_trading:
-            # Kiểm tra thời gian kể từ vị thế cuối cùng
-            if current_time - last_trade_time < 60:  # Chờ ít nhất 60 giây trước khi mở vị thế mới
-                log_with_format('info', "Bỏ qua tín hiệu giao dịch: Chưa đủ thời gian kể từ vị thế cuối cùng",
-                                section="MINER")
+            if await check_volatility(closes):
+                await asyncio.sleep(60)
+                continue
+
+            data_buffer.extend(ohlcv)
+            if len(data_buffer) > BUFFER_SIZE:
+                data_buffer = data_buffer[-BUFFER_SIZE:]
+
+            if current_time - last_retrain_time >= RETRAIN_INTERVAL and len(data_buffer) >= LSTM_WINDOW + 10:
+                log_with_format('info', "--- HUẤN LUYỆN LẠI MÔ HÌNH ---", section="CPU")
+                await train_advanced_model(ohlcv, historical_closes, historical_highs, historical_lows, initial=False)
+                last_retrain_time = current_time
+
+            ema_short = np.mean(closes[-5:])
+            ema_long = np.mean(closes[-15:])
+            volatility = np.std(closes[-10:]) / np.mean(closes[-10:]) if np.mean(closes[-10:]) != 0 else 0
+            rsi = calculate_rsi(historical_closes) or 50
+            macd, signal_line, _ = calculate_macd(historical_closes) or (np.zeros_like(closes), 0, 0)
+            sma, upper_band, lower_band = calculate_bollinger_bands(historical_closes) or (0, 0, 0)
+            adx = calculate_adx(historical_highs, historical_lows, historical_closes) or 0
+            vwap = calculate_vwap(ohlcv)
+            volume_spike = volumes[-1] > (np.mean(volumes[-10:-1]) * VOLUME_SPIKE_THRESHOLD) if len(volumes) > 10 else False
+            vwm = calculate_volume_weighted_momentum(volumes, closes)
+
+            ohlcv_120s, _ = await get_historical_data_multi_timeframe('2m', 5)
+            candle_pattern = detect_candle_patterns(ohlcv_120s) if ohlcv_120s else None
+
+            stoch_k, stoch_d = calculate_stochastic_rsi(historical_closes) or (50, 50)
+
+            prediction_result = await predict_price_and_confidence(
+                closes, volumes, atr, historical_closes, historical_highs, historical_lows, historical_volumes, buy_score=0, sell_score=0
+            )
+            if prediction_result is None or prediction_result[0] is None:
+                predicted_price = current_price
+                confidence_buy = 0.5
+                confidence_sell = 0.5
+                predicted_change = 0
             else:
-                timestamp = current_time
-                confirmed = await confirm_trade_signal(buy_score, sell_score, predicted_change, trend, ema_short, ema_long,
-                                                       macd, signal_line, rsi, adx, volume_spike, candle_pattern, stoch_k, stoch_d)
-                if confirmed:
-                    # Khi mở vị thế thành công, cập nhật last_trade_time
-                    if buy_score > sell_score and buy_score >= BUY_THRESHOLD:
-                        log_with_format('info', "Tín hiệu MUA: Điểm={score}", variables={'score': f"{buy_score:.2f}"}, section="MINER")
-                        order = await place_order_with_tp_sl('buy', current_price, quantity, volatility, predicted_price, atr)
-                        if order:
-                            last_trade_time = current_time  # Cập nhật thời gian mở vị thế
-                    elif sell_score > buy_score and sell_score >= SELL_THRESHOLD:
-                        log_with_format('info', "Tín hiệu BÁN: Điểm={score}", variables={'score': f"{sell_score:.2f}"}, section="MINER")
-                        order = await place_order_with_tp_sl('sell', current_price, quantity, volatility, predicted_price, atr)
-                        if order:
-                            last_trade_time = current_time  # Cập nhật thời gian mở vị thế
+                predicted_price, confidence_buy, confidence_sell = prediction_result
+                predicted_change = predicted_price - current_price if predicted_price else 0
 
-        last_price = current_price
-        await asyncio.sleep(CHECK_INTERVAL)
+            trend = await get_trend_confirmation()
+            market_state = 'trending' if adx > 25 else 'sideways' if adx < 20 else 'breakout' if volume_spike else 'normal'
 
-    # Đóng kết nối với Binance khi bot dừng
-    await exchange.close()
-    log_with_format('info', "Đã đóng kết nối với Binance", section="NET")       
+            buy_score = 0
+            sell_score = 0
+            active_strategies = []
+            for strategy in STRATEGIES:
+                wins = strategy_performance[strategy.name]['wins']
+                losses = strategy_performance[strategy.name]['losses']
+                total = wins + losses
+                if total >= 50 and wins / total < 0.4:
+                    log_with_format('warning', "Tạm dừng chiến lược {name}: Win Rate={win_rate}",
+                                    variables={'name': strategy.name, 'win_rate': f"{wins/total:.2%}"}, section="CHIẾN LƯỢC")
+                    continue
+                dynamic_weight = strategy.weight * (wins / total if total > 0 else 1.0)
+
+                kwargs = {
+                    'current_price': current_price,
+                    'last_price': last_price,
+                    'upper_band': upper_band,
+                    'lower_band': lower_band,
+                    'sma': sma,
+                    'rsi': rsi,
+                    'ema_short': ema_short,
+                    'ema_long': ema_long,
+                    'adx': adx,
+                    'predicted_change': predicted_change,
+                    'atr': atr,
+                    'volume_spike': volume_spike,
+                    'macd': macd,
+                    'signal_line': signal_line,
+                    'volatility': volatility,
+                    'vwap': vwap,
+                    'candle_pattern': candle_pattern
+                }
+                if strategy.evaluate_buy(**kwargs):
+                    buy_score += dynamic_weight
+                    active_strategies.append(strategy.name)
+                if strategy.evaluate_sell(**kwargs):
+                    sell_score += dynamic_weight
+                    active_strategies.append(strategy.name)
+
+            buy_score += (confidence_buy * 50) + (vwm > 0) * 10
+            sell_score += (confidence_sell * 50) + (vwm < 0) * 10
+            log_with_format('info', "Điểm mua: {buy}, Điểm bán: {sell}, VWM={vwm}",
+                            variables={'buy': f"{buy_score:.2f}", 'sell': f"{sell_score:.2f}", 'vwm': f"{vwm:.4f}"}, section="CHIẾN LƯỢC")
+
+            historical_closes_5m, _ = await get_historical_data_multi_timeframe('5m', 20)
+            historical_closes_15m, _ = await get_historical_data_multi_timeframe('15m', 20)
+            if historical_closes_5m is not None and historical_closes_15m is not None:
+                ema_short_5m = np.mean(historical_closes_5m[-5:])
+                ema_long_5m = np.mean(historical_closes_5m[-15:])
+                ema_short_15m = np.mean(historical_closes_15m[-5:])
+                ema_long_15m = np.mean(historical_closes_15m[-15:])
+                if ema_short_5m > ema_long_5m and ema_short_15m > ema_long_15m:
+                    buy_score += 20
+                elif ema_short_5m < ema_long_5m and ema_short_15m < ema_long_15m:
+                    sell_score += 20
+
+            usable_balance = available_balance * USE_PERCENTAGE
+            notional_value_max = usable_balance * LEVERAGE
+            max_quantity = notional_value_max / current_price if current_price != 0 else 0
+            reward_to_risk = TAKE_PROFIT_PERCENT / STOP_LOSS_PERCENT
+            kelly = kelly_criterion(performance['win_rate'], reward_to_risk)
+            kelly_adjusted = kelly * max(confidence_buy, confidence_sell)
+            base_quantity = trade_size * kelly_adjusted
+            quantity = min(base_quantity, max_quantity)
+
+            if position is not None:
+                log_with_format('info', "Bỏ qua tín hiệu giao dịch: Đã có vị thế {side} đang mở",
+                                variables={'side': position['side'].upper()}, section="MINER")
+            elif not is_trading:
+                # Kiểm tra thời gian kể từ vị thế cuối cùng
+                if current_time - last_trade_time < 60:  # Chờ ít nhất 60 giây trước khi mở vị thế mới
+                    log_with_format('info', "Bỏ qua tín hiệu giao dịch: Chưa đủ thời gian kể từ vị thế cuối cùng",
+                                    section="MINER")
+                else:
+                    timestamp = current_time
+                    confirmed = await confirm_trade_signal(buy_score, sell_score, predicted_change, trend, ema_short, ema_long,
+                                                           macd, signal_line, rsi, adx, volume_spike, candle_pattern, stoch_k, stoch_d)
+                    if confirmed:
+                        # Khi mở vị thế thành công, cập nhật last_trade_time
+                        if buy_score > sell_score and buy_score >= BUY_THRESHOLD:
+                            log_with_format('info', "Tín hiệu MUA: Điểm={score}", variables={'score': f"{buy_score:.2f}"}, section="MINER")
+                            order = await place_order_with_tp_sl('buy', current_price, quantity, volatility, predicted_price, atr)
+                            if order:
+                                last_trade_time = current_time  # Cập nhật thời gian mở vị thế
+                        elif sell_score > buy_score and sell_score >= SELL_THRESHOLD:
+                            log_with_format('info', "Tín hiệu BÁN: Điểm={score}", variables={'score': f"{sell_score:.2f}"}, section="MINER")
+                            order = await place_order_with_tp_sl('sell', current_price, quantity, volatility, predicted_price, atr)
+                            if order:
+                                last_trade_time = current_time  # Cập nhật thời gian mở vị thế
+
+            last_price = current_price
+            await asyncio.sleep(CHECK_INTERVAL)
+
+    except Exception as e:
+        log_with_format('error', "Lỗi nghiêm trọng trong bot: {error}", variables={'error': str(e)}, section="CPU")
+        await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi nghiêm trọng: {str(e)}")
+
+    finally:
+        # Đảm bảo đóng kết nối với Binance khi bot dừng hoặc gặp lỗi
+        await exchange.close()
+        log_with_format('info', "Đã đóng kết nối với Binance", section="NET")
+
 # Thêm hàm này sau phần "Hàm chỉ báo kỹ thuật" (dưới `calculate_stochastic_rsi`)
 async def check_volatility(closes):
     """Kiểm tra biến động bằng ATR và tạm dừng giao dịch nếu quá cao."""
