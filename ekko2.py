@@ -916,6 +916,19 @@ async def check_and_close_position(current_price):
                         variables={'error': str(e)}, section="MINER")
         
 
+async def watch_price():
+    global current_price
+    while True:
+        try:
+            ticker = await exchange.watch_ticker(SYMBOL)
+            current_price = float(ticker['last'])
+            log_with_format('debug', "Cập nhật giá từ WebSocket: {price}", variables={'price': f"{current_price:.2f}"}, section="NET")
+        except Exception as e:
+            log_with_format('error', "Lỗi WebSocket giá: {error}", variables={'error': str(e)}, section="NET")
+            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi WebSocket giá: {str(e)}")
+            await asyncio.sleep(5)
+
+
 
 async def close_position(side, quantity, close_price, close_reason):
     global position, performance
