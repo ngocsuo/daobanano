@@ -165,10 +165,10 @@ async def watch_position_and_price():
     global position, current_price
     while True:
         try:
-            # Theo dõi giá qua WebSocket
-            ticker = await exchange.watch_ticker(SYMBOL)
+            # Lấy giá qua HTTP API
+            ticker = await exchange.fetch_ticker(SYMBOL)
             current_price = float(ticker['last'])
-            log_with_format('debug', "Giá hiện tại từ WebSocket: {price}", 
+            log_with_format('debug', "Giá hiện tại từ polling: {price}", 
                            variables={'price': f"{current_price:.2f}"}, section="NET")
 
             # Đồng bộ và kiểm tra vị thế
@@ -189,11 +189,14 @@ async def watch_position_and_price():
                     position['quantity'] = float(current_position['info']['positionAmt'])
                     await update_trailing_stop(current_price, atr=None)  # ATR sẽ được tính trong hàm nếu cần
                     await check_and_close_position(current_price)
-            await asyncio.sleep(0.1)  # Tăng tần suất kiểm tra
+            
+            # Nghỉ giữa các lần polling để tránh vượt giới hạn API
+            await asyncio.sleep(5)  # Kiểm tra mỗi 5 giây
         except Exception as e:
-            log_with_format('error', "Lỗi WebSocket vị thế/giá: {error}", 
+            log_with_format('error', "Lỗi polling vị thế/giá: {error}", 
                            variables={'error': str(e)}, section="NET")
-            await asyncio.sleep(5)
+            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi polling vị thế/giá: {str(e)}")
+            await asyncio.sleep(10)  # Đợi lâu hơn nếu lỗi để tránh spam API
 
 # --- Hàm khởi tạo mô hình ---
 def create_lstm_model():
@@ -915,21 +918,21 @@ async def check_and_close_position(current_price):
         log_with_format('error', "Lỗi kiểm tra và đóng vị thế: {error}", 
                         variables={'error': str(e)}, section="MINER")
         
-
 async def watch_price():
     global current_price
     while True:
         try:
-            ticker = await exchange.watch_ticker(SYMBOL)
+            ticker = await exchange.fetch_ticker(SYMBOL)
             current_price = float(ticker['last'])
-            log_with_format('debug', "Cập nhật giá từ WebSocket: {price}", variables={'price': f"{current_price:.2f}"}, section="NET")
+            log_with_format('debug', "Cập nhật giá từ polling: {price}", 
+                           variables={'price': f"{current_price:.2f}"}, section="NET")
+            await asyncio.sleep(5)  # Kiểm tra mỗi 5 giây
         except Exception as e:
-            log_with_format('error', "Lỗi WebSocket giá: {error}", variables={'error': str(e)}, section="NET")
-            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi WebSocket giá: {str(e)}")
-            await asyncio.sleep(5)
-
-
-
+            log_with_format('error', "Lỗi polling giá: {error}", 
+                           variables={'error': str(e)}, section="NET")
+            await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Lỗi polling giá: {str(e)}")
+            await asyncio.sleep(10)  # Đợi lâu hơn nếu lỗi
+            
 async def close_position(side, quantity, close_price, close_reason):
     global position, performance
     try:
