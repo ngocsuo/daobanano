@@ -144,7 +144,7 @@ MAX_PREDICTION_ERROR = 0.05
 BUY_THRESHOLD = 46
 SELL_THRESHOLD = 46
 USE_PERCENTAGE = 0.9
-
+last_trade_time = 0
 # Biến toàn cục
 scaler = MinMaxScaler()
 lstm_model = None
