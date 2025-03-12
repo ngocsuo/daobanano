@@ -997,23 +997,23 @@ async def place_order_with_tp_sl(side, price, quantity, volatility, predicted_pr
 
         if side == 'buy':
             sl_price = entry_price * (1 - STOP_LOSS_PERCENT_ADJUSTED)  # SL dưới giá vào lệnh
-            tp_price = entry_price * (1 + TAKE_PROFIT_PERCENT_ADJUSTED)  # TP trên giá vào lệnh
+            tp_price = predicted_price if predicted_price else entry_price * (1 + TAKE_PROFIT_PERCENT_ADJUSTED)  # TP trên giá vào lệnh
         else:  # side == 'sell'
             sl_price = entry_price * (1 + STOP_LOSS_PERCENT_ADJUSTED)  # SL trên giá vào lệnh
-            tp_price = entry_price * (1 - TAKE_PROFIT_PERCENT_ADJUSTED)  # TP dưới giá vào lệnh
+            tp_price = predicted_price if predicted_price else entry_price * (1 - TAKE_PROFIT_PERCENT_ADJUSTED)  # TP dưới giá vào lệnh
 
-        # Điều chỉnh giá để tránh "immediately triggered"
-        min_price_diff = entry_price * 0.005  # Khoảng cách tối thiểu 0.5% so với giá hiện tại
+        # Điều chỉnh giá SL để tránh "immediately triggered"
+        min_price_diff = entry_price * 0.01  # Tăng khoảng cách tối thiểu lên 1% để an toàn hơn
         if side == 'buy':
-            sl_price = min(sl_price, current_price - min_price_diff)  # SL không được vượt quá giá hiện tại
-            tp_price = max(tp_price, current_price + min_price_diff)  # TP không được dưới giá hiện tại
+            # Đảm bảo SL thấp hơn current_price một khoảng an toàn
+            sl_price = min(sl_price, current_price * 0.99)  # Giảm tối đa 1% so với giá hiện tại
+            tp_price = max(tp_price, current_price + min_price_diff)  # TP không dưới giá hiện tại
         else:
-            sl_price = max(sl_price, current_price + min_price_diff)  # SL không được dưới giá hiện tại
-            tp_price = min(tp_price, current_price - min_price_diff)  # TP không được vượt quá giá hiện tại
+            sl_price = max(sl_price, current_price + min_price_diff)  # SL không dưới giá hiện tại
+            tp_price = min(tp_price, current_price * 0.99)  # TP giảm tối đa 1% so với giá hiện tại
 
-        # Làm tròn giá theo tick size của Binance
-        symbol_info = await exchange.fetch_trading_fees(SYMBOL)
-        tick_size = 0.01  # Giả định tick size, cần lấy từ API thực tế
+        # Làm tròn giá theo tick size (giả định tick size = 0.01)
+        tick_size = 0.01  # Cần lấy từ API nếu muốn chính xác hơn
         sl_price = round(sl_price / tick_size) * tick_size
         tp_price = round(tp_price / tick_size) * tick_size
 
@@ -1127,7 +1127,7 @@ async def place_order_with_tp_sl(side, price, quantity, volatility, predicted_pr
                         await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] KHẨN CẤP: Không thể đóng vị thế {side.upper()} do lỗi: {str(close_error)}. Kiểm tra thủ công!")
                     await asyncio.sleep(wait_time)
         return None
-        
+            
 async def close_position(side, quantity, close_price, close_reason):
     global position, performance
     try:
