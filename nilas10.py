@@ -229,17 +229,15 @@ async def watch_position_and_price():
             await asyncio.sleep(5)
 
 
-
-
+import traceback
 
 async def test_order_placement():
     global exchange, current_price, position
-    # Kiểm tra file đang chạy
     log_with_format('info', "Đang chạy file: {file}", variables={'file': __file__}, section="MINER")
     log_with_format('info', "=== BẮT ĐẦU KIỂM TRA ĐẶT VỊ THẾ VÀ TP/SL ===", section="MINER")
-    log_with_format('info', "Phiên bản code: TEST_QUANTITY set cứng = 1", section="MINER")
+    log_with_format('info', "Phiên bản code: TEST_QUANTITY set cứng = 0.02", section="MINER")
     MIN_NOTIONAL_VALUE = 20.0
-    TEST_QUANTITY = 1  # Set cứng TEST_QUANTITY = 1
+    TEST_QUANTITY = 0.02  # Set cứng TEST_QUANTITY = 0.02
     wait_time = 5
     max_retries = 3
     monitoring_time = 120
@@ -278,12 +276,13 @@ async def test_order_placement():
 
         # Mở vị thế test với lệnh BUY
         log_with_format('info', "Đặt vị thế BUY để test", section="MINER")
+        tp_price = current_price * 1.02  # TP tăng 2%
         test_order = await place_order_with_tp_sl(
             side='buy',
             price=current_price,
             quantity=TEST_QUANTITY,
-            volatility=0.0,
-            predicted_price=current_price * 1.02,
+            volatility=0.02,  # Dùng volatility để tính SL thấp hơn (giả định hàm dùng volatility)
+            predicted_price=tp_price,  # TP
             atr=0
         )
 
@@ -418,6 +417,7 @@ async def test_order_placement():
                         await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] KHẨN CẤP: Test thất bại và không đóng được vị thế: {str(e)}")
         await bot.send_message(chat_id=CHAT_ID, text=f"[{SYMBOL}] Test thất bại: {str(e)}")
         return False
+
 
 async def check_and_close_position(current_price):
     global position
