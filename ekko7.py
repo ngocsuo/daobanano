@@ -498,6 +498,13 @@ def detect_candle_patterns(ohlcv_120s):
         return "doji"
     return None
 
+def calculate_volume_weighted_momentum(volumes, closes):
+    """Tính động lượng dựa trên khối lượng giao dịch."""
+    if len(volumes) < 10 or len(closes) < 10:
+        return 0
+    vwm = np.sum(volumes[-10:] * (closes[-10:] - closes[-11:-1])) / np.sum(volumes[-10:]) if np.sum(volumes[-10:]) != 0 else 0
+    return vwm
+
 # --- Hàm lấy dữ liệu ---
 async def get_historical_data():
     for attempt in range(5):  # Tăng số lần thử từ 3 lên 5
